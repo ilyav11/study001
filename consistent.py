@@ -22,3 +22,15 @@ class Route:
         pass
 
 
+class ConsistentHash:
+    def __init__(self):
+        pass
+
+    
+    def AddRoute(self, route):
+        pass
+
+    def DelRoute(self, route):
+        pass
+
+        
