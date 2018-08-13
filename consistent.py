@@ -1,4 +1,6 @@
 import ipaddress
+import enum
+
 
 
 class Nexthop :
@@ -7,7 +9,7 @@ class Nexthop :
         self._ipaddr = ipaddress.ip_address(ipaddr)
 
     
-    def Set(self, ipaddr):
+    def set_nh(self, ipaddr):
         self._ipaddr = ipaddr
 
 
@@ -27,10 +29,10 @@ class Route:
         self._nhset = nhset
 
 
-    def SetPrefix(self, prefix):
+    def set_prefix(self, prefix):
         self._prefix = prefix
 
-    def SetNHSet(self, nhset):
+    def set_nhset(self, nhset):
         self._nhset = nhset
 
     @property
@@ -65,7 +67,7 @@ class Prefix:
     def __init__(self):
         self._prefix = ipaddress.ip_address(0)
 
-    def Set(self, prefix):
+    def set_prefix(self, prefix):
         self._prefix = ipaddress.ip_network(prefix, strict = False)
 
     def __str__(self):
@@ -85,20 +87,30 @@ class Prefix:
 
 
 class ConsistentHash:
+
+    class SystemState(enum.Enum):
+        STABLE = 1
+        NON_STABLE = 2
+
+    class SystemConsistent(enum.Enum):
+        CONSISTENT = 1
+        NON_CONSISTENT = 2
+
+    
     def __init__(self):
         pass
 
     
-    def AddRoute(self, route):
+    def add_route(self, route):
         pass
 
-    def DelRoute(self, route):
+    def del_route(self, route):
         pass
 
 
 
 p = Prefix()
-p.Set("192.168.1.1/24")
+p.set_prefix("192.168.1.1/24")
 
 nh1 = Nexthop("10.0.0.1")
 nh2 = Nexthop("10.0.0.2")
