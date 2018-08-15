@@ -63,6 +63,10 @@ class Prefix:
     def mask(self):
         return self._prefix.netmask
 
+    @property
+    def hashable(self):
+        return self._prefix.with_prefixlen
+
 class Route:
     def __init__(self, prefix, nhset):
         
@@ -90,29 +94,41 @@ class Route:
         return self._dc
 
     def __str__(self):
-        return str(self._prefix) + "\t-->\t{" + ", ".join(str(s) for s in self._nhset) + "}" + "(0x{:02X})".format(id(self.dc))
+        return str(self._prefix) + "\t-->\t{" + ", ".join(str(s) for s in self._nhset) + "}" + "(0x{:02X})".format(id(self._dc))
 
 class RouteContainer:
     def __init__(self):
-        self._s = set()
+        self._d = {}
     
     def add(self, r: Route):
-        self._s.add(r)
+        self._d[r.prefix.hashable] = r
 
     def remove(self, r: Route):
-        self._s.remove(r)
+        self._d.pop(r.prefix.hashable)
     
     def __iter__(self):
-        for s in self._s:
-            yield s
+        for s in self._d.keys():
+            yield self._d[s]
 
-    def __str(self):
-        return "{" + ", ".join(str(s) for s in self._s) + "}"
+    def __str__(self):
+        return "{" + ", ".join(str(self._d[s]) for s in self._d.keys()) + "}"
 
     def prefixes(self):
         s: Route
-        for s in self._s:
-            yield s.prefix
+        for s in self._d.keys():
+            yield self._d[s].prefix
+
+    def __getitem__(self, r:Prefix):
+        if r in self.prefixes():
+            return self._d[r.hashable]
+        else:
+            return None
+
+    def __setitem__(self, idx: Prefix, r: Route):
+        self._d[idx.hashable] = r
+
+    def __delitem__(self, r: Prefix):
+        self._d.pop(r.hashable)
 
 Routes = RouteContainer()
 
@@ -243,7 +259,7 @@ class ConsistentHash:
         
         if l_dc:
             if len(l_dc)!= 1:
-                exit
+                raise AssertionError
             dc = l_dc[0]
             newRoute.dc = dc
             dc.ref_count += 1
@@ -261,9 +277,11 @@ class ConsistentHash:
 
 
     def _change_route(self, route: Route):
-        pass
+        currR = Routes[route.prefix]
 
-    def del_route(self, route):
+        print(currR, route)
+        
+    def del_route(self, route: Route):
         pass
 
 
