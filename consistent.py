@@ -1,7 +1,26 @@
 import ipaddress
 import enum
+import copy
 
 
+class pSet:
+    def __init__(self, s):
+        self._s = s
+    
+    @property
+    def s(self):
+        return self._s
+
+    @s.setter
+    def s(self, s):
+        self._s = s
+
+    def __str__(self):
+        return "{" +  ", ".join(str(s) for s in self._s) + "}"
+
+    def __iter__(self):
+        for s in self._s:
+            yield s
 
 class Nexthop :
 
@@ -21,11 +40,34 @@ class Nexthop :
     def ipaddress(self):
         return self._ipaddr
 
+
+class Prefix:
+    def __init__(self):
+        self._prefix = ipaddress.ip_address(0)
+
+    def set_prefix(self, prefix):
+        self._prefix = ipaddress.ip_network(prefix, strict = False)
+
+    def __str__(self):
+        return str(self._prefix)
+
+    def __eq__(self, other):
+        return self._prefix == other._prefix
+
+
+    @property
+    def network(self):
+        return self._prefix.network_address
+
+    @property
+    def mask(self):
+        return self._prefix.netmask
+
 class Route:
     def __init__(self, prefix, nhset):
         
-        self._prefix = prefix
-        self._nhset = nhset
+        self._prefix = copy.copy(prefix)
+        self._nhset = copy.copy(nhset)
         self._dc = None
 
 
@@ -48,9 +90,31 @@ class Route:
         return self._dc
 
     def __str__(self):
-        return str(self._prefix) + "-->{" + ", ".join(str(s) for s in self._nhset) + "}"
+        return str(self._prefix) + "\t-->\t{" + ", ".join(str(s) for s in self._nhset) + "}" + "(0x{:02X})".format(id(self.dc))
 
-Routes = set()
+class RouteContainer:
+    def __init__(self):
+        self._s = set()
+    
+    def add(self, r: Route):
+        self._s.add(r)
+
+    def remove(self, r: Route):
+        self._s.remove(r)
+    
+    def __iter__(self):
+        for s in self._s:
+            yield s
+
+    def __str(self):
+        return "{" + ", ".join(str(s) for s in self._s) + "}"
+
+    def prefixes(self):
+        s: Route
+        for s in self._s:
+            yield s.prefix
+
+Routes = RouteContainer()
 
 
 class ActualContainer:
@@ -72,7 +136,7 @@ class ActualContainer:
         return self._nh_set
 
 
-ActualContainers = set()
+ActualContainers = pSet(set())
 
 
 class DesiredContainer:
@@ -84,7 +148,7 @@ class DesiredContainer:
 
     def __init__(self):
         self._current_state = self.State.FAILED
-        self._nh_set = set()
+        self._nh_set = pSet(set())
         self._ac = None
         self._child_set = set()
         self._father = None
@@ -96,11 +160,11 @@ class DesiredContainer:
 
     @property
     def nh_set(self):
-        return self._nh_set
+        return self._nh_set.s
 
     @nh_set.setter
     def nh_set(self, nh_set):
-        self._nh_set = nh_set
+        self._nh_set = pSet(nh_set)
 
     @property
     def active_container(self):
@@ -123,29 +187,9 @@ class DesiredContainer:
         self._ref_count = ref_count
 
     def __str__(self):
-        return str(vars(self))
+        return "id: " + "0x{:02X}".format(id(self)) + "\n" + "\n".join(str(a) + ": " + str(b) for a,b in vars(self).items())
 
-DesiredContainers = set()
-
-class Prefix:
-    def __init__(self):
-        self._prefix = ipaddress.ip_address(0)
-
-    def set_prefix(self, prefix):
-        self._prefix = ipaddress.ip_network(prefix, strict = False)
-
-    def __str__(self):
-        return str(self._prefix)
-
-
-    @property
-    def network(self):
-        return self._prefix.network_address
-
-    @property
-    def mask(self):
-        return self._prefix.netmask
-
+DesiredContainers = pSet(set())
 
 class SDK:
     def __init__(self):
@@ -180,7 +224,7 @@ class ConsistentHash:
 
     
     def add_route(self, route: Route):
-        if route in Routes:
+        if route.prefix in Routes.prefixes():
             self._change_route(route)
         else:
             self._new_route(route)
@@ -195,9 +239,12 @@ class ConsistentHash:
 
         Routes.add(newRoute)
 
-        dc = [dc for dc in DesiredContainers if dc.nh_set == newRoute.nh_set]
+        l_dc = [dc for dc in DesiredContainers if dc.nh_set == newRoute.nh_set]
         
-        if dc:
+        if l_dc:
+            if len(l_dc)!= 1:
+                exit
+            dc = l_dc[0]
             newRoute.dc = dc
             dc.ref_count += 1
         else:
@@ -206,7 +253,7 @@ class ConsistentHash:
             dc.ref_count = 1
             dc.nh_set = newRoute.nh_set
             self._allocate_new_ac(dc)
-            DesiredContainers.add(dc)
+            DesiredContainers.s.add(dc)
         if dc.State != DesiredContainer.State.FAILED:
             SdkObject.SDKProgramRoute(newRoute)
 
@@ -252,9 +299,33 @@ if __name__ == "__main__":
 
     ch.add_route(r)
 
-    print(ch)
-    print(Routes)
-    print("\n".join(str(dc) for dc in DesiredContainers))
-    print(ActualContainers)
+    p.set_prefix("172.1.1.1/24")
+
+    r = Route(p,s)
+
+    ch.add_route(r)
+
+    p.set_prefix("192.168.1.2/24")
+
+    nh1 = Nexthop("10.0.0.3")
+    nh2 = Nexthop("10.0.0.2")
+    s = set([nh1, nh2])
+
+    r = Route(p, s)
+
+    ch.add_route(r)
+
+    p.set_prefix("172.1.1.2/24")
+
+    r = Route(p,s)
+
+    ch.add_route(r)
+
+    print("Consistent ", ch)
+    print("Routes\n", "\n".join(str(r) for r in Routes))
+    print("DesiredContainers\n", "\n".join(str(dc) for dc in DesiredContainers))
+    print("ActualContainers\n", ActualContainers)
+
+    print(" ".join(str(s) for s in Routes.prefixes()))
 
 
