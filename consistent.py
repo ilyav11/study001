@@ -1,6 +1,7 @@
 import ipaddress
 import enum
 import copy
+import logging
 
 
 class pSet:
@@ -14,6 +15,10 @@ class pSet:
     @s.setter
     def s(self, s):
         self._s = copy.copy(s)
+
+    @s.deleter
+    def s(self):
+        self._s = set()
 
     def __str__(self):
         return "{" +  ", ".join(str(s) for s in self._s) + "}"
@@ -82,6 +87,10 @@ class Route:
     def prefix(self, p: Prefix):
         self._prefix = copy.copy(p)
 
+    @prefix.deleter
+    def prefix(self):
+        self._prefix = Prefix()
+
     @property
     def nh_set(self):
         return self._nhset
@@ -89,6 +98,10 @@ class Route:
     @nh_set.setter
     def nh_set(self, nh_set):
         self._nhset = copy.copy(nh_set)
+    
+    @nh_set.deleter
+    def nh_set(self):
+        self._nhset = set()
     
     @property
     def desired_container(self):
@@ -98,12 +111,17 @@ class Route:
     def desired_container(self, dc):
         self._dc = dc
 
+    @desired_container.deleter
+    def desired_container(self):
+        self._dc = None
+
     def __str__(self):
         return str(self._prefix) + "\t-->\t{" + ", ".join(str(s) for s in self._nhset) + "}"  + "(0x{:02X})".format(id(self._dc))
 
 class RouteContainer:
-    def __init__(self):
+    def __init__(self, log: logging.Logger):
         self._d = {}
+        self._log = log.getChild("r_cont")
     
     def add(self, r: Route):
         self._d[r.prefix.hashable] = r
@@ -135,14 +153,12 @@ class RouteContainer:
     def __delitem__(self, r: Prefix):
         self._d.pop(r.hashable)
 
-Routes = RouteContainer()
-
-
 class ActualContainer:
-    def __init__(self):
+    def __init__(self, log: logging.Logger):
         self._dc = None
         self._resolved = False
         self._nh_set = set()
+        self._log = log.getChild("a_cont")
 
     @property
     def desired_container(self):
@@ -156,12 +172,13 @@ class ActualContainer:
     def resolved(self, res):
         self.resolved = res
 
+    @resolved.deleter
+    def resolved(self):
+        self.resolved = False
+
     @property
     def nh_set(self):
         return self._nh_set
-
-
-ActualContainers = pSet(set())
 
 
 class DesiredContainer:
@@ -171,20 +188,39 @@ class DesiredContainer:
         FAILED = 2
         PARTIAL = 3
 
-    def __init__(self):
+    def __init__(self, log: logging.Logger):
         self._current_state = self.State.FAILED
         self._nh_set = set()
         self._ac = None
         self._child_set = set()
         self._father = None
         self._ref_count = 0
+        self._log = log.getChild("d_cont")
 
-    def __del__(self):
+    def delete(self):
+
+        # need to delete all references to father
+
+        self._log.debug("deleting container %s\n", str(self))
+
+        for dc in self._child_set:
+            dc.father =  None
+
+        #remove child list
+        self._child_set = None
+
+        # need to update father
+
+        if self._father:
+            self._father.child_set.remove(self)
+
+        #delete father
+
+        self._father = None
+
         self._current_state = self.State.FAILED
         self._nh_set = None
         self._ac = None
-        self._child_set = None
-        self._father = None
         self._ref_count = 0
       
    
@@ -195,6 +231,10 @@ class DesiredContainer:
     @nh_set.setter
     def nh_set(self, nh_set):
         self._nh_set = pSet(nh_set)
+
+    @nh_set.deleter
+    def nh_set(self):
+        self._nh_set = pSet(set())
 
     @property
     def actual_container(self):
@@ -212,6 +252,10 @@ class DesiredContainer:
     def father(self, f):
         self._father = f
 
+    @father.deleter
+    def father(self):
+        self._father = None
+
     @property
     def ref_count(self):
         return self._ref_count
@@ -224,18 +268,32 @@ class DesiredContainer:
     def current_state(self, newS):
         self._current_state = newS
 
+    @current_state.deleter
+    def current_state(self):
+        self._current_state =  self.State.FAILED
+
     @ref_count.setter
-    def ref_count(self, ref_c: int):
+    def ref_count(self, ref_c):
         self._ref_count = ref_c
 
-    def __str__(self):
-        return "id: " + "0x{:02X}".format(id(self)) + "\n" + "\n".join(str(a) + ": " + str(b) for a,b in vars(self).items())
+    @ref_count.deleter
+    def ref_count(self):
+        self._ref_count = 0
 
-DesiredContainers = pSet(set())
+    def __str__(self):
+        s =  "\n\nDesiredContainer\nid " + \
+        "0x{:02X}".format(id(self)) + "\n" + \
+        "\n".join(str(a) + ": " + \
+        str(b) for a,b in vars(self).items() if a != "_father")
+        if (self._father is None):
+            s1 = "\n_father: None"
+        else:
+            s1 = "\n_father: 0x{:02X}\n".format(id(self._father))
+        return s + s1
 
 class SDK:
-    def __init__(self):
-        pass
+    def __init__(self, log: logging.Logger):
+        self._log = log.getChild("sdk")
 
     def SDKProgramRoute(self, route: Route):
         pass
@@ -245,8 +303,6 @@ class SDK:
 
     def SDKAlign(self, ac: ActualContainer, nhset):
         pass
-
-SdkObject = SDK() 
 
 _current_time: int = 0
 
@@ -265,29 +321,34 @@ class ConsistentHash:
     _periodic_timer = 30 #seconds
     
     def __init__(self):
+        self._log = logging.getLogger("c_hash")
+        self.DesiredContainers = pSet(set())
+        self.SdkObject = SDK(self._log)
+        self.ActualContainers = pSet(set())
+        self.Routes = RouteContainer(self._log)
+
         self._system_consistent = self.SystemConsistent.CONSISTENT
         self._system_stable = self.SystemState.STABLE #need to be stable
         self._last_stable = _current_time
 
+        FORMAT = '%(asctime)-15s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
+
+        logging.basicConfig(filename = "log.txt", format=FORMAT, level=logging.DEBUG, filemode = "w")
 
     
     def add_route(self, route: Route):
-        if route.prefix in Routes.prefixes():
+        if route.prefix in self.Routes.prefixes():
             self._change_route(route)
         else:
             self._new_route(route)
 
     def _new_route(self, route: Route):
 
-        global Routes
-        global DesiredContainers
-        global SdkObject
-
         newRoute = Route(route.prefix, route.nh_set)
 
-        Routes.add(newRoute)
+        self.Routes.add(newRoute)
 
-        l_dc = [dc for dc in DesiredContainers if dc.nh_set == newRoute.nh_set]
+        l_dc = [dc for dc in self.DesiredContainers if dc.nh_set == newRoute.nh_set]
         
         if l_dc:
             if len(l_dc)!= 1:
@@ -296,14 +357,17 @@ class ConsistentHash:
             newRoute.desired_container = dc
             dc.ref_count += 1
         else:
-            dc = DesiredContainer()
+            dc = DesiredContainer(self._log)
             newRoute.desired_container = dc
             dc.ref_count = 1
             dc.nh_set = copy.copy(newRoute.nh_set)
             self._allocate_new_ac(dc)
-            DesiredContainers.s.add(dc)
+            self.DesiredContainers.s.add(dc)
+
+            self._log.debug("Creating container %s for route %s\n", str(dc), str(newRoute))
+
         if dc.State != DesiredContainer.State.FAILED:
-            SdkObject.SDKProgramRoute(newRoute)
+            self.SdkObject.SDKProgramRoute(newRoute)
 
         self._periodic()
 
@@ -313,13 +377,10 @@ class ConsistentHash:
         currR: Route
         currDC: DesiredContainer
 
-        currR = Routes[newR.prefix]
+        currR = self.Routes[newR.prefix]
 
         currDC = currR.desired_container
         currDC.ref_count -= 1
-
-        if currDC.ref_count == 0:
-            DesiredContainers.s.remove(currDC)
 
         currR.nh_set = newR.nh_set
 
@@ -333,19 +394,23 @@ class ConsistentHash:
                 dc = dc_child_list[0]
                 currR.desired_container = dc
                 dc.ref_count += 1
+                self._log.debug("Add new route %s to contianer %s\n", str(currR), str(dc))
             else:
                 ac: ActualContainer
 
-                dc = DesiredContainer()
-                DesiredContainers.s.add(dc)
+                dc = DesiredContainer(self._log)
+                self.DesiredContainers.s.add(dc)
                 currR.desired_container = dc
                 dc.nh_set = newR.nh_set
                 dc.ref_count = 1
                 currDC.child_set.add(dc)
                 dc.father = currDC
-                ac = SdkObject.SDKCloneAC(currDC.actual_container)
+
+                self._log.debug("Creating container %s for route %s\n", str(dc), str(currR))
+
+                ac = self.SdkObject.SDKCloneAC(currDC.actual_container)
                 if ac != None:
-                    SdkObject.SDKAlign(ac, dc.nh_set)
+                    self.SdkObject.SDKAlign(ac, dc.nh_set)
                     ac.resolved = True
                     dc.current_state = DesiredContainer.State.RESOLVED
                     dc.actual_container = ac
@@ -356,23 +421,30 @@ class ConsistentHash:
                     self._optimize_non_stable()
         else:
 
-            dc_list = [dc for dc in DesiredContainers if dc.nh_set == newR.nh_set]
+            dc_list = [dc for dc in self.DesiredContainers if dc.nh_set == newR.nh_set]
             if len(dc_list) > 1:
                 raise AssertionError
             if len(dc_list) == 1:
                 dc = dc_list[0]
+                print(dc)
                 dc.ref_count += 1
+                print(dc)
                 currR.desired_container = dc
             else:
-                dc = DesiredContainer()
+                dc = DesiredContainer(self._log)
                 currR.desired_container = dc
                 dc.ref_count = 1
                 dc.nh_set = newR.nh_set
                 self._allocate_new_ac(dc)
-                DesiredContainers.s.add(dc)
+                self.DesiredContainers.s.add(dc)
+
+
+        if currDC.ref_count == 0:
+            self.DesiredContainers.s.remove(currDC)
+            currDC.delete()
 
         if currR.desired_container.current_state != DesiredContainer.State.FAILED:
-            SdkObject.SDKProgramRoute(currR)
+            self.SdkObject.SDKProgramRoute(currR)
 
         self._periodic()
 
