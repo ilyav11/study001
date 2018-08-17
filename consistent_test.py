@@ -31,6 +31,8 @@ def dump_ch(ch):
     print("\nDesiredContainers\n", ch.DesiredContainers)
     print("\nActualContainers\n", ch.ActualContainers)
 
+    print("\nSDK\n", ch.SdkObject)
+
     print("\n", " ".join(str(s) for s in ch.Routes.prefixes()))
 
 

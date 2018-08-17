@@ -31,6 +31,9 @@ class pSet:
     def __eq__(self, other):
         return self._s == other._s
 
+    def __len__(self):
+        return len(self._s)
+
 class Nexthop :
 
     def __init__(self, ipaddr):
@@ -175,17 +178,17 @@ class ActualContainer:
     def desired_container(self):
         return self._dc
 
+    @desired_container.setter
+    def desired_container(self, dc):
+        self._dc = dc
+
     @property
     def resolved(self):
         return self._resolved
 
     @resolved.setter
     def resolved(self, res):
-        self.resolved = res
-
-    @resolved.deleter
-    def resolved(self):
-        self.resolved = False
+        self._resolved = res
 
     @property
     def consistent(self):
@@ -199,6 +202,21 @@ class ActualContainer:
     def nh_set(self):
         return self._nh_set
 
+    @nh_set.setter
+    def nh_set(self, nhset):
+        self._nh_set = pSet(nhset)
+
+    def __str__(self):
+
+        s = "id: 0x{:X} ".format(id(self))
+        
+        for a,b in vars(self).items():
+            if a == "_dc":
+                s += " {} : 0x{:X}".format(a,id(b))
+            else:
+                s += " {} : {}".format(a,b)
+        return s + "\n"
+        
 
 class DesiredContainer:
 
@@ -259,6 +277,10 @@ class DesiredContainer:
     def actual_container(self):
         return self._ac
 
+    @actual_container.setter
+    def actual_container(self, ac: ActualContainer):
+        self._ac = ac
+
     @property
     def child_set(self):
         return self._child_set
@@ -309,7 +331,12 @@ class DesiredContainer:
                     s += ", _father: None"
                 else:
                     s += ", _father: 0x{:02X}".format(id(self._father))
-            else:
+            elif a == "_ac":
+                if b == None:
+                    s += ", {}: None".format(a)
+                else:
+                    s += ", {}: 0x{:02X}".format(a,id(b))                
+            else:    
                 s += ", {} : {}".format(a,b)
 
         if self._child_set:
@@ -359,10 +386,10 @@ class cDesiredContainers:
 
 class SDK:
 
-    _CONSISTENT_HASH_SIZE = 5
+    _CONSISTENT_HASH_SIZE = 10
     _SINGLE_HASH_SIZE = 1
 
-    def __init__(self, log: logging.Logger, memory = 20):
+    def __init__(self, log: logging.Logger, memory = 200):
         self._log = log.getChild("sdk")
         self._memory = memory
         
@@ -379,17 +406,20 @@ class SDK:
 
 
     def SDKAlign(self, ac: ActualContainer, nhset):
-        pass
+        ac.nh_set = nhset
 
     def SDKCreateContainer(self, nhset, if_consistent: bool):
+
+        self._log.debug("nhset=%s, consistent=%s memory=%d", str(pSet(nhset)), str(if_consistent), self._memory)
         if if_consistent:
-            total = len(nhset)* SDK._CONSISTENT_HASH_SIZE
+            total = SDK._CONSISTENT_HASH_SIZE
         else:
             total = len(nhset)* SDK._SINGLE_HASH_SIZE
         
         if self._memory >= total:
             self._memory -= total
         else:
+            self._log.debug("failed to allocate %d(memory=%d)", total, self._memory)
             return None
 
         ac = ActualContainer(self._log)
@@ -401,9 +431,12 @@ class SDK:
 
     def SDKDeleteContainer(self, ac: ActualContainer):
         if ac.consistent:
-            self._memory += len(ac.nh_set) * SDK._CONSISTENT_HASH_SIZE
+            self._memory += SDK._CONSISTENT_HASH_SIZE
         else:
             self._memory += len(ac.nh_set) * SDK._SINGLE_HASH_SIZE
+
+    def __str__(self):
+        return "".join(" {}: {}".format(a,b) for a,b in vars(self).items())
 
 
 class ConsistentHash:
@@ -430,7 +463,7 @@ class ConsistentHash:
         self._system_resolved = self.SystemResolved.RESOLVED
         self._system_stable = self.SystemState.STABLE #need to be stable
         self._last_resolved = 0
-        self._consistent_adm = False
+        self._consistent_adm = True
 
         FORMAT = '%(asctime)-15s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
 
@@ -512,11 +545,14 @@ class ConsistentHash:
                 assert currDC.actual_container
 
                 ac = self.SdkObject.SDKCloneAC(currDC.actual_container)
-                if ac != None:
+                if ac:
+                    ac.nh_set = currDC.actual_container.nh_set
                     self.SdkObject.SDKAlign(ac, dc.nh_set)
                     ac.resolved = True
                     dc.current_state = DesiredContainer.State.RESOLVED
                     dc.actual_container = ac
+                    #TODO add to document
+                    ac.desired_container = dc
                     self.ActualContainers.s.add(ac)
                 else:
                     self._system_stable = self.SystemState.NON_STABLE
@@ -590,6 +626,9 @@ class ConsistentHash:
             dc.actual_container = ac
             self.ActualContainers.s.add(ac)
 
+            #TODO add to document
+            ac.desired_container = dc
+
             return ac
         else:
             self._system_resolved = False
@@ -608,6 +647,9 @@ class ConsistentHash:
                 else:
                     dc.current_state = dc.State.PARTIAL
                 self.ActualContainers.s.add(ac)
+
+                #TODO add to document
+                ac.desired_container = dc
 
                 return ac
 
@@ -634,12 +676,13 @@ class ConsistentHash:
             return ac
         
         if fallback:
-            any_nh_id = random.randint(0, len(nhset))
+            any_nh_id = random.randint(0, len(nhset)-1)
             any_nh = pSet(set())
             ac = self.SdkObject.SDKCreateContainer(any_nh, False)
             if ac:
-                any_nh.s.add(nhset[any_nh_id])
+                any_nh.s.add(list(nhset)[any_nh_id])
                 ac.nh_set = any_nh
+
                 ac.resolved = False
                 return ac
         
