@@ -1,49 +1,51 @@
+import ipaddress
 import consistent as cs
 
 
+def add_route(ch: cs.ConsistentHash, route, ns_list):
+    p = cs.Prefix()
+    p.set_prefix(route)
 
-p = cs.Prefix()
-p.set_prefix("192.168.1.1/24")
+    s = set()
 
-nh1 = cs.Nexthop("10.0.0.1")
-nh2 = cs.Nexthop("10.0.0.2")
-s = set([nh1, nh2])
+    for l in ns_list:
+        nh = cs.Nexthop(l)
+        s.add(nh)
 
-r = cs.Route(p, s)
+    r = cs.Route(p, s)
+
+    ch.add_route(r)
+
+def delete_route(ch: cs.ConsistentHash, route):
+    p = cs.Prefix()
+    p.set_prefix(route)
+
+    r = cs.Route(p, set())
+
+    ch.del_route(r)
+
+def dump_ch(ch):
+    print("\n===\nConsistent ", ch)
+
+    print("\nRoutes\n", ch.Routes)
+    print("\nDesiredContainers\n", ch.DesiredContainers)
+    print("\nActualContainers\n", ch.ActualContainers)
+
+    print("\n", " ".join(str(s) for s in ch.Routes.prefixes()))
+
+
 
 ch = cs.ConsistentHash()
 
-ch.add_route(r)
+add_route(ch, "192.1.1.1/24", ["10.0.0.1", "10.0.0.2" , "10.0.0.3" ])
+add_route(ch, "172.1.1.1/24",   ["10.0.0.1", "10.0.0.2",  "10.0.0.3" ])
+add_route(ch, "173.1.1.1/24",   ["10.0.0.1", "10.0.0.2",  "10.0.0.3" ])
 
+add_route(ch, "192.1.1.1/24", ["10.0.0.1", "10.0.0.2" ])
+add_route(ch, "172.1.1.1/24",   ["10.0.0.1", "10.0.0.2" ])
 
-p.set_prefix("172.1.1.1/24")
+add_route(ch, "172.1.1.1/24",   ["10.0.0.1" ])
 
-r = cs.Route(p,s)
+# delete_route(ch, "192.1.1.1/24" )
 
-ch.add_route(r)
-
-p.set_prefix("192.168.1.2/24")
-
-#nh1 = cs.Nexthop("10.0.0.3")
-nh2 = cs.Nexthop("10.0.0.2")
-#s = set([nh1, nh2])
-s = set([nh2])
-
-r = cs.Route(p, s)
-
-ch.add_route(r)
-
-
-#p.set_prefix("172.1.1.2/24")
-
-#r = cs.Route(p,s)
-
-#ch.add_route(r)
-
-print("\n===\nConsistent ", ch)
-
-print("\nRoutes\n", ch.Routes)
-print("\nDesiredContainers\n", "\n\n".join(str(dc) for dc in ch.DesiredContainers))
-print("\nActualContainers\n", ch.ActualContainers)
-
-print("\n", " ".join(str(s) for s in ch.Routes.prefixes()))
+dump_ch(ch)

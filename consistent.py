@@ -2,6 +2,7 @@ import ipaddress
 import enum
 import copy
 import logging
+import random
 
 
 class pSet:
@@ -27,6 +28,9 @@ class pSet:
         for s in self._s:
             yield s
 
+    def __eq__(self, other):
+        return self._s == other._s
+
 class Nexthop :
 
     def __init__(self, ipaddr):
@@ -44,6 +48,12 @@ class Nexthop :
     @property
     def ipaddress(self):
         return self._ipaddr
+
+    def __eq__(self, other):
+        return self._ipaddr  == other._ipaddr
+
+    def __hash__(self):
+        return hash(self._ipaddr)
 
 
 class Prefix:
@@ -159,6 +169,7 @@ class ActualContainer:
         self._resolved = False
         self._nh_set = set()
         self._log = log.getChild("a_cont")
+        self._consistent = False
 
     @property
     def desired_container(self):
@@ -175,6 +186,14 @@ class ActualContainer:
     @resolved.deleter
     def resolved(self):
         self.resolved = False
+
+    @property
+    def consistent(self):
+        return self._consistent
+
+    @consistent.setter
+    def consistent(self, val: bool):
+        self._consistent = val
 
     @property
     def nh_set(self):
@@ -280,31 +299,112 @@ class DesiredContainer:
     def ref_count(self):
         self._ref_count = 0
 
+    def print_me(self, level):
+        
+        s =  "id " +  "0x{:02X}".format(id(self))
+
+        for a,b in vars(self).items():
+            if a == "_father":
+                if self._father == None:
+                    s += ", _father: None"
+                else:
+                    s += ", _father: 0x{:02X}".format(id(self._father))
+            else:
+                s += ", {} : {}".format(a,b)
+
+        if self._child_set:
+                for c in self._child_set:
+                    s += "\n" + "\t"*(level+1)
+                    s += c.print_me(level + 1)
+        return s
+
     def __str__(self):
-        s =  "\n\nDesiredContainer\nid " + \
-        "0x{:02X}".format(id(self)) + "\n" + \
-        "\n".join(str(a) + ": " + \
-        str(b) for a,b in vars(self).items() if a != "_father")
-        if (self._father is None):
-            s1 = "\n_father: None"
-        else:
-            s1 = "\n_father: 0x{:02X}\n".format(id(self._father))
-        return s + s1
+        s =  "id " +  "0x{:02X}".format(id(self))
+
+        for a,b in vars(self).items():
+            if a == "_father":
+                if self._father == None:
+                    s += ", _father: None"
+                else:
+                    s += ", _father: 0x{:02X}".format(id(self._father))
+            else:
+                s += ", {} : {}".format(a, b)
+        return s
+
+class cDesiredContainers:
+    def __init__(self, log: logging.Logger):
+        self._log = log.getChild("d_conts")
+        self._s = set()
+
+    def __str__(self):
+
+        st = ""
+        for s in self._s:
+            if s.father == None:
+                st += s.print_me(0) + "\n"
+        return st
+
+    def __iter__(self):
+        for s in self._s:
+            yield s
+
+    def add(self, dc: DesiredContainer):
+        self._s.add(dc)
+
+    def remove(self, dc: DesiredContainer):
+        self._s.remove(dc)
+
+
+    
 
 class SDK:
-    def __init__(self, log: logging.Logger):
+
+    _CONSISTENT_HASH_SIZE = 5
+    _SINGLE_HASH_SIZE = 1
+
+    def __init__(self, log: logging.Logger, memory = 20):
         self._log = log.getChild("sdk")
+        self._memory = memory
+        
+        
 
     def SDKProgramRoute(self, route: Route):
         pass
 
     def SDKCloneAC(self, ac: ActualContainer):
-        return ac
+        new_ac = self.SDKCreateContainer(ac.nh_set, ac.consistent)
+
+        return new_ac
+
+
 
     def SDKAlign(self, ac: ActualContainer, nhset):
         pass
 
-_current_time: int = 0
+    def SDKCreateContainer(self, nhset, if_consistent: bool):
+        if if_consistent:
+            total = len(nhset)* SDK._CONSISTENT_HASH_SIZE
+        else:
+            total = len(nhset)* SDK._SINGLE_HASH_SIZE
+        
+        if self._memory >= total:
+            self._memory -= total
+        else:
+            return None
+
+        ac = ActualContainer(self._log)
+
+        ac.consistent = if_consistent
+
+        return ac
+
+
+    def SDKDeleteContainer(self, ac: ActualContainer):
+        if ac.consistent:
+            self._memory += len(ac.nh_set) * SDK._CONSISTENT_HASH_SIZE
+        else:
+            self._memory += len(ac.nh_set) * SDK._SINGLE_HASH_SIZE
+
 
 class ConsistentHash:
 
@@ -312,9 +412,9 @@ class ConsistentHash:
         STABLE = 1
         NON_STABLE = 2
 
-    class SystemConsistent(enum.Enum):
-        CONSISTENT = 1
-        NON_CONSISTENT = 2
+    class SystemResolved(enum.Enum):
+        RESOLVED = 1
+        NOT_RESOLVED = 2
 
     _long_period_of_time = 600 #seconds
 
@@ -322,14 +422,15 @@ class ConsistentHash:
     
     def __init__(self):
         self._log = logging.getLogger("c_hash")
-        self.DesiredContainers = pSet(set())
+        self.DesiredContainers = cDesiredContainers(self._log)
         self.SdkObject = SDK(self._log)
         self.ActualContainers = pSet(set())
         self.Routes = RouteContainer(self._log)
 
-        self._system_consistent = self.SystemConsistent.CONSISTENT
+        self._system_resolved = self.SystemResolved.RESOLVED
         self._system_stable = self.SystemState.STABLE #need to be stable
-        self._last_stable = _current_time
+        self._last_resolved = 0
+        self._consistent_adm = False
 
         FORMAT = '%(asctime)-15s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
 
@@ -362,7 +463,7 @@ class ConsistentHash:
             dc.ref_count = 1
             dc.nh_set = copy.copy(newRoute.nh_set)
             self._allocate_new_ac(dc)
-            self.DesiredContainers.s.add(dc)
+            self.DesiredContainers.add(dc)
 
             self._log.debug("Creating container %s for route %s\n", str(dc), str(newRoute))
 
@@ -384,7 +485,7 @@ class ConsistentHash:
 
         currR.nh_set = newR.nh_set
 
-        if self._system_stable == self.SystemState.STABLE:
+        if (self._system_stable == self.SystemState.STABLE) and (self._consistent_adm == True):
             dc_child_list = [dc for dc in currDC.child_set if dc.nh_set == newR.nh_set] # TODO how I compare nh_set?
             if len(dc_child_list) > 1:
                 raise AssertionError
@@ -394,12 +495,12 @@ class ConsistentHash:
                 dc = dc_child_list[0]
                 currR.desired_container = dc
                 dc.ref_count += 1
-                self._log.debug("Add new route %s to contianer %s\n", str(currR), str(dc))
+                self._log.debug("Creating container %s for route %s\n", str(dc), str(currR))
             else:
                 ac: ActualContainer
 
                 dc = DesiredContainer(self._log)
-                self.DesiredContainers.s.add(dc)
+                self.DesiredContainers.add(dc)
                 currR.desired_container = dc
                 dc.nh_set = newR.nh_set
                 dc.ref_count = 1
@@ -408,14 +509,17 @@ class ConsistentHash:
 
                 self._log.debug("Creating container %s for route %s\n", str(dc), str(currR))
 
+                assert currDC.actual_container
+
                 ac = self.SdkObject.SDKCloneAC(currDC.actual_container)
                 if ac != None:
                     self.SdkObject.SDKAlign(ac, dc.nh_set)
                     ac.resolved = True
                     dc.current_state = DesiredContainer.State.RESOLVED
                     dc.actual_container = ac
+                    self.ActualContainers.s.add(ac)
                 else:
-                    self._system_consistent = self.SystemState.NON_STABLE
+                    self._system_stable = self.SystemState.NON_STABLE
                     self._allocate_new_ac(dc)
                     self._clean_stable_state()
                     self._optimize_non_stable()
@@ -436,11 +540,11 @@ class ConsistentHash:
                 dc.ref_count = 1
                 dc.nh_set = newR.nh_set
                 self._allocate_new_ac(dc)
-                self.DesiredContainers.s.add(dc)
-
+                self.DesiredContainers.add(dc)
+                self._log.debug("Creating container %s for route %s\n", str(dc), str(currR))
 
         if currDC.ref_count == 0:
-            self.DesiredContainers.s.remove(currDC)
+            self.DesiredContainers.remove(currDC)
             currDC.delete()
 
         if currR.desired_container.current_state != DesiredContainer.State.FAILED:
@@ -450,19 +554,97 @@ class ConsistentHash:
 
         
     def del_route(self, route: Route):
-        pass
+        
+        currR: Route
+        currDC: DesiredContainer
 
+        if route.prefix not in self.Routes.prefixes():
+            return
+
+        currR = self.Routes[route.prefix]
+        currDC = currR.desired_container
+
+        currDC.ref_count -= 1
+
+        if currDC.ref_count == 0:
+            self.DesiredContainers.remove(currDC)
+            currDC.delete()
+            self._periodic()
+        
+        self.Routes.remove(currR)
 
     def _periodic(self):
         pass
 
     def periodic_tick(self):
-        global _current_time
-
-        _current_time += self._periodic_timer
+        pass
+        
 
     def _allocate_new_ac(self, dc: DesiredContainer):
-        pass
+        ac: ActualContainer
+
+        ac = self._create_new_ac(dc.nh_set, False)
+
+        if ac:
+            dc.current_state = DesiredContainer.State.RESOLVED
+            dc.actual_container = ac
+            self.ActualContainers.s.add(ac)
+
+            return ac
+        else:
+            self._system_resolved = False
+            if self._system_stable == self.SystemState.STABLE:
+                self._system_stable = self.SystemState.NON_STABLE
+                self._clean_stable_state()
+                self._optimize_non_stable()
+                self._last_resolved = self._now()
+            ac = self._create_new_ac(dc.nh_set, True)
+            if ac:
+
+                dc.actual_container = ac
+
+                if ac.resolved:
+                    dc.current_state = dc.State.RESOLVED
+                else:
+                    dc.current_state = dc.State.PARTIAL
+                self.ActualContainers.s.add(ac)
+
+                return ac
+
+        dc.current_state = dc.State.FAILED
+
+        return None
+
+#         AC.DC = DC
+#         ACs += AC
+#         DC.State = AC.Resolved ? Resolved : Partial
+#         DC.AC = AC
+#         return AC
+#     else:
+#         DC.State = Failed
+#         return None
+                      
+    def _create_new_ac(self, nhset, fallback: bool):
+        ac: ActualContainer
+
+        ac = self.SdkObject.SDKCreateContainer(nhset, self._consistent_adm)
+        if ac:
+            ac.nh_set = nhset
+            ac.resolved = True
+            return ac
+        
+        if fallback:
+            any_nh_id = random.randint(0, len(nhset))
+            any_nh = pSet(set())
+            ac = self.SdkObject.SDKCreateContainer(any_nh, False)
+            if ac:
+                any_nh.s.add(nhset[any_nh_id])
+                ac.nh_set = any_nh
+                ac.resolved = False
+                return ac
+        
+        return None
+
 
     def _clean_stable_state(self):
         pass
@@ -473,6 +655,8 @@ class ConsistentHash:
     def __str__(self):
         return str(vars(self))
 
+    def _now(self):
+        return 0
 
 
 
