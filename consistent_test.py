@@ -3,6 +3,7 @@ import consistent as cs
 import time
 import logging
 import random
+import copy
 
 
 
@@ -31,12 +32,13 @@ base_net  = "172.1.1.0"
 next_hop_set = set()
 prefix_set = set()
 
-test_route_set = set()
+test_dictionary = {}
+test_route_list = []
 
 
 def add_routes(ch: cs.ConsistentHash):
 
-    for r in test_route_set:
+    for r in test_route_list:
         ch.add_route(r)
 
 
@@ -68,44 +70,74 @@ def generate_data(routes, next_hops):
 
         r = cs.Route(p, s)
 
-        test_route_set.add(r)
+        test_route_list.append(r)
 
 
+def generate_routes():
 
-def generate_route_set(cycle):
-    r: cs.Route
-    for r in test_route_set:
-        nh_set = next_hop_set - r.nh_set
+    for prefix in prefix_set:
+        p_list = []
 
-        assert len(nh_set) > 0
+        p_nh = copy.copy(next_hop_set)
 
-        idx = random.randint(0, len(nh_set)-1)
+        p = cs.Prefix()
+        p.set_prefix(prefix)
+        s = set()
 
-        nh = list(nh_set)[idx]
+        for i in range(len(next_hop_set)):
+            idx = random.randint(0, len(p_nh) - 1)
+            nh = list(p_nh)[idx]
 
-        r.nh_set.add(nh)
+            s.add(nh)
+            p_nh.remove(nh)
 
+            r = cs.Route(p, s)
+            p_list.append(r)
+
+        test_dictionary[prefix] = p_list
+
+    
+#    print(", ".join("{}: [{}] ".format(str(a),", ".join(str(c) for c in b))  for a,b in test_dictionary.items()))
+
+    while True:
+
+        if len(test_dictionary.keys()) == 0:
+            break
+
+        idx = random.randint(0, len(test_dictionary.keys()) - 1 )
+
+        key = list(test_dictionary.keys())[idx]
+
+        l = test_dictionary[key]
+        
+        if len(l) == 0:
+            del test_dictionary[key]
+            continue
+
+        r = l[0]
+
+        test_route_list.append(r)
+        l.remove(r)
+
+        if len(l) == 0:
+            del test_dictionary[key]
+
+#    print(cs.pSet(test_route_list))
 
 
 def generate_run(routes, next_hops):
 
     generate_data(routes, next_hops)
+    generate_routes()
 
-#    ch = cs.ConsistentHash(debug_level = logging.DEBUG)
+    ch = cs.ConsistentHash(debug_level = logging.DEBUG)
     ch = cs.ConsistentHash()
     ch.run()
     ch.set_admin_state(True)
+  
+    add_routes(ch)
 
-    for i in range(next_hops):
-        generate_route_set(i)
-
-        print(cs.pSet(test_route_set))
-        
-        add_routes(ch)
-
-        dump_ch(ch)
-
-        time.sleep(5)
+    dump_ch(ch)
 
     time.sleep(10)
 
@@ -116,4 +148,4 @@ def generate_run(routes, next_hops):
 
 
 
-generate_run(200,5)   
+generate_run(2,5)   
