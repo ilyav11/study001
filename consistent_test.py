@@ -1,20 +1,10 @@
 import ipaddress
 import consistent as cs
+import time
+import logging
+import random
 
 
-def add_route(ch: cs.ConsistentHash, route, ns_list):
-    p = cs.Prefix()
-    p.set_prefix(route)
-
-    s = set()
-
-    for l in ns_list:
-        nh = cs.Nexthop(l)
-        s.add(nh)
-
-    r = cs.Route(p, s)
-
-    ch.add_route(r)
 
 def delete_route(ch: cs.ConsistentHash, route):
     p = cs.Prefix()
@@ -35,19 +25,95 @@ def dump_ch(ch):
 
     print("\n", " ".join(str(s) for s in ch.Routes.prefixes()))
 
+base_nh = "192.1.1.1"
+base_net  = "172.1.1.0"
+
+next_hop_set = set()
+prefix_set = set()
+
+test_route_set = set()
 
 
-ch = cs.ConsistentHash()
+def add_routes(ch: cs.ConsistentHash):
 
-add_route(ch, "192.1.1.1/24", ["10.0.0.1", "10.0.0.2" , "10.0.0.3" ])
-add_route(ch, "172.1.1.1/24",   ["10.0.0.1", "10.0.0.2",  "10.0.0.3" ])
-add_route(ch, "173.1.1.1/24",   ["10.0.0.1", "10.0.0.2",  "10.0.0.3" ])
+    for r in test_route_set:
+        ch.add_route(r)
 
-add_route(ch, "192.1.1.1/24", ["10.0.0.1", "10.0.0.2" ])
-add_route(ch, "172.1.1.1/24",   ["10.0.0.1", "10.0.0.2" ])
 
-add_route(ch, "172.1.1.1/24",   ["10.0.0.1" ])
+def generate_data(routes, next_hops):
 
-# delete_route(ch, "192.1.1.1/24" )
+    global next_hop_set
+    global prefix_set
 
-dump_ch(ch)
+    next_hop_set = set()
+
+    for i in range(next_hops):
+
+        addr = ipaddress.ip_address(base_nh) + random.randint(256, 256+10000)
+        nh = ipaddress.ip_address(addr)
+
+        next_hop_set.add(nh)
+
+    for i in range(routes):
+        addr = ipaddress.ip_address(base_net) + random.randint(256, 256+100000)
+        route = ipaddress.ip_network(str(ipaddress.ip_address(addr)) + "/24",strict = False)
+
+        prefix_set.add(route)
+
+    for i in prefix_set:
+        p = cs.Prefix()
+        p.set_prefix(i)
+
+        s = set()
+
+        r = cs.Route(p, s)
+
+        test_route_set.add(r)
+
+
+
+def generate_route_set(cycle):
+    r: cs.Route
+    for r in test_route_set:
+        nh_set = next_hop_set - r.nh_set
+
+        assert len(nh_set) > 0
+
+        idx = random.randint(0, len(nh_set)-1)
+
+        nh = list(nh_set)[idx]
+
+        r.nh_set.add(nh)
+
+
+
+def generate_run(routes, next_hops):
+
+    generate_data(routes, next_hops)
+
+#    ch = cs.ConsistentHash(debug_level = logging.DEBUG)
+    ch = cs.ConsistentHash()
+    ch.run()
+    ch.set_admin_state(True)
+
+    for i in range(next_hops):
+        generate_route_set(i)
+
+        print(cs.pSet(test_route_set))
+        
+        add_routes(ch)
+
+        dump_ch(ch)
+
+        time.sleep(5)
+
+    time.sleep(10)
+
+    dump_ch(ch)
+
+    ch.stop()
+
+
+
+
+generate_run(200,5)   
