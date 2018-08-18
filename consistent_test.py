@@ -18,13 +18,13 @@ def delete_route(ch: cs.ConsistentHash, route):
 def dump_ch(ch):
     print("\n===\nConsistent ", ch)
 
-    print("\nRoutes\n", ch.Routes)
+#    print("\nRoutes\n", ch.Routes)
     print("\nDesiredContainers\n", ch.DesiredContainers)
     print("\nActualContainers\n", ch.ActualContainers)
 
     print("\nSDK\n", ch.SdkObject)
 
-    print("\n", " ".join(str(s) for s in ch.Routes.prefixes()))
+#    print("\n", " ".join(str(s) for s in ch.Routes.prefixes()))
 
 base_nh = "192.1.1.1"
 base_net  = "172.1.1.0"
@@ -38,8 +38,14 @@ test_route_list = []
 
 def add_routes(ch: cs.ConsistentHash):
 
+    count = 0
     for r in test_route_list:
         ch.add_route(r)
+
+        count += 1
+
+        if count % 20 == 0:
+            time.sleep(2)
 
 
 def generate_data(routes, next_hops):
@@ -61,16 +67,6 @@ def generate_data(routes, next_hops):
         route = ipaddress.ip_network(str(ipaddress.ip_address(addr)) + "/24",strict = False)
 
         prefix_set.add(route)
-
-    for i in prefix_set:
-        p = cs.Prefix()
-        p.set_prefix(i)
-
-        s = set()
-
-        r = cs.Route(p, s)
-
-        test_route_list.append(r)
 
 
 def generate_routes():
@@ -130,14 +126,14 @@ def generate_run(routes, next_hops):
     generate_data(routes, next_hops)
     generate_routes()
 
-    ch = cs.ConsistentHash(debug_level = logging.DEBUG)
+ #   ch = cs.ConsistentHash(debug_level = logging.DEBUG)
     ch = cs.ConsistentHash()
     ch.run()
     ch.set_admin_state(True)
   
     add_routes(ch)
 
-    dump_ch(ch)
+#    dump_ch(ch)
 
     time.sleep(10)
 
@@ -148,4 +144,4 @@ def generate_run(routes, next_hops):
 
 
 
-generate_run(2,5)   
+generate_run(200,5)   
