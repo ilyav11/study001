@@ -629,9 +629,7 @@ class ConsistentHash:
                 raise AssertionError
             if len(dc_list) == 1:
                 dc = dc_list[0]
-                print(dc)
                 dc.ref_count += 1
-                print(dc)
                 currR.desired_container = dc
             else:
                 dc = DesiredContainer(self._log)

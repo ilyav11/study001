@@ -32,11 +32,14 @@ base_net  = "172.1.1.0"
 next_hop_set = set()
 prefix_set = set()
 
-test_dictionary = {}
+#test_dictionary = {}
+
 test_route_list = []
 
+test_full_route_list = []
 
-def add_routes(ch: cs.ConsistentHash):
+
+def simulate_fat_tree_converge(ch: cs.ConsistentHash):
 
     count = 0
     for r in test_route_list:
@@ -44,8 +47,9 @@ def add_routes(ch: cs.ConsistentHash):
 
         count += 1
 
-        if count % 20 == 0:
-            time.sleep(2)
+        if count % 200 == 0:
+            print(".")
+            time.sleep(1)
 
 
 def generate_data(routes, next_hops):
@@ -68,8 +72,26 @@ def generate_data(routes, next_hops):
 
         prefix_set.add(route)
 
+def generate_full_route():
 
-def generate_routes():
+    test_full_route_list = []
+    
+    for prefix in prefix_set:
+        
+        p = cs.Prefix()
+        p.set_prefix(prefix)
+        s = set()
+
+        for i in next_hop_set):
+            s.add(nh)
+        
+            r = cs.Route(p, s)
+            test_full_route_list[prefix] = r
+
+
+def generate_fat_tree_converge():
+
+    test_dictionary = {}
 
     for prefix in prefix_set:
         p_list = []
@@ -123,15 +145,22 @@ def generate_routes():
 
 def generate_run(routes, next_hops):
 
+    print("Generating data...\n")
     generate_data(routes, next_hops)
-    generate_routes()
+
+    print("Generating fat tree converge")
+    generate_fat_tree_converge()
+
+    print("Generate full route list")
+    generate_full_route()
 
  #   ch = cs.ConsistentHash(debug_level = logging.DEBUG)
     ch = cs.ConsistentHash()
     ch.run()
     ch.set_admin_state(True)
   
-    add_routes(ch)
+    print("Simulate fat tree converge...\n")
+    simulate_fat_tree_converge(ch)
 
 #    dump_ch(ch)
 
