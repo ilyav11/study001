@@ -509,6 +509,7 @@ class ConsistentHash:
         self._sched = sched.scheduler()
         self._current_time = 0
         self._last_periodic = 0
+        self._lock = threading.Lock()
 
         self._running = True
         self._freeze = False
@@ -524,10 +525,15 @@ class ConsistentHash:
 
     
     def add_route(self, route: Route):
+
+        self._lock.acquire()
+
         if route.prefix in self.Routes.prefixes():
             self._change_route(route)
         else:
             self._new_route(route)
+        
+        self._lock.release()
 
     def _new_route(self, route: Route):
 
@@ -565,7 +571,7 @@ class ConsistentHash:
             self.SdkObject.SDKProgramRoute(newRoute)
 
         if dc.current_state != DesiredContainer.State.RESOLVED:
-            self._periodic() #in case if desired container was failed - need to check current state
+            self._periodic(lock = False) #in case if desired container was failed - need to check current state
 
 
     def _change_route(self, newR: Route):
@@ -651,37 +657,44 @@ class ConsistentHash:
         if currR.desired_container.current_state != DesiredContainer.State.FAILED:
             self.SdkObject.SDKProgramRoute(currR)
 
-        self._periodic()
+        self._periodic(lock = False)
 
         
     def del_route(self, route: Route):
+
+        self._lock.acquire()
         
         currR: Route
         currDC: DesiredContainer
 
         self._log.log(_TRACE_LEVEL, "route=%s", str(route))
 
-        if route.prefix not in self.Routes.prefixes():
-            return
+        if route.prefix in self.Routes.prefixes():
+            
 
-        currR = self.Routes[route.prefix]
-        currDC = currR.desired_container
+            currR = self.Routes[route.prefix]
+            currDC = currR.desired_container
 
-        currDC.ref_count -= 1
+            currDC.ref_count -= 1
 
-        if currDC.ref_count == 0:
-            self.DesiredContainers.remove(currDC)
+            if currDC.ref_count == 0:
+                self.DesiredContainers.remove(currDC)
 
-            if currDC.actual_container != None:
-                self.ActualContainers.s.remove(currDC.actual_container)
-                self.SdkObject.SDKDeleteContainer(currDC.actual_container)
- 
-            currDC.delete()
-            self._periodic()
+                if currDC.actual_container != None:
+                    self.ActualContainers.s.remove(currDC.actual_container)
+                    self.SdkObject.SDKDeleteContainer(currDC.actual_container)
+    
+                currDC.delete()
+                self._periodic(lock = False)
+            
+            self.Routes.remove(currR)
         
-        self.Routes.remove(currR)
+        self._lock.release()
 
-    def _periodic(self):
+    def _periodic(self, lock = True):
+
+        if lock:
+            self._lock.acquire()
 
         self._log.log(_TRACE_LEVEL, "Periodic: timer=%d", self._current_time)
 
@@ -690,6 +703,9 @@ class ConsistentHash:
             self._check_for_resolution()
         if self._system_stable != self.SystemState.STABLE:
             self._check_for_stable()
+
+        if lock:
+            self._lock.release()
 
 
     def _periodic_tick(self):

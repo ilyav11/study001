@@ -49,7 +49,7 @@ def simulate_fat_tree_converge(ch: cs.ConsistentHash):
 
         if count % 200 == 0:
             print(".")
-            time.sleep(1)
+            #time.sleep(1)
 
 
 def generate_data(routes, next_hops):
@@ -67,7 +67,7 @@ def generate_data(routes, next_hops):
         next_hop_set.add(nh)
 
     for i in range(routes):
-        addr = ipaddress.ip_address(base_net) + random.randint(256, 256+100000)
+        addr = ipaddress.ip_address(base_net) + random.randint(256, 256+1000000)
         route = ipaddress.ip_network(str(ipaddress.ip_address(addr)) + "/24",strict = False)
 
         prefix_set.add(route)
@@ -82,16 +82,18 @@ def generate_full_route():
         p.set_prefix(prefix)
         s = set()
 
-        for i in next_hop_set):
-            s.add(nh)
+        for i in next_hop_set:
+            s.add(i)
         
-            r = cs.Route(p, s)
-            test_full_route_list[prefix] = r
+        r = cs.Route(p, s)
+        test_full_route_list.append(r)
 
 
 def generate_fat_tree_converge():
 
     test_dictionary = {}
+
+    print("prefixes {} nh={}".format(len(list(prefix_set)), len(list(next_hop_set))))
 
     for prefix in prefix_set:
         p_list = []
