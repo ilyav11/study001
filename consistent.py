@@ -596,7 +596,15 @@ class ConsistentHash:
                 dc = dc_child_list[0]
                 currR.desired_container = dc
                 dc.ref_count += 1
-                self._log.log(_TRACE_LEVEL, "Creating container %s for route %s\n", str(dc), str(currR))
+                self._log.log(_TRACE_LEVEL, "Using existing container %s for route %s\n", str(dc), str(currR))
+            elif currDC.Father and currDC.Father.dc.nh_set == newR.nh_set:
+                dc: DesiredContainer
+
+                dc = currDC.Father.dc
+                currR.desired_container = dc
+                dc.ref_count += 1
+                self._log.log(_TRACE_LEVEL, "Using existing container %s for route %s\n", str(dc), str(currR))
+                
             else:
                 ac: ActualContainer
 

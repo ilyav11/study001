@@ -173,6 +173,45 @@ def generate_run(routes, next_hops):
     ch.stop()
 
 
+def apply_routes(prefix_list, nh_list, ch: cs.ConsistentHash):
+
+    for prefix in prefix_list:
+
+        p = cs.Prefix()
+        p.set_prefix(prefix)
+        s = set()
+
+        for i in nh_list:
+            s.add(i)
+        
+        r = cs.Route(p, s)
+
+        ch.add_route(r)
 
 
-generate_run(200,5)   
+def small_test():
+
+    ch = cs.ConsistentHash()
+    ch.run()
+    ch.set_admin_state(True)
+
+    nh_list = ["10.0.1.1", "10.0.2.2"]
+    prefix_list  = ["192.1.1.1/24", "192.2.2.2/24", "192.3.3.3/24"]
+    apply_routes(prefix_list, nh_list, ch)
+    dump_ch(ch)
+
+    nh_list = ["10.0.1.1"]
+    prefix_list  = ["192.1.1.1/24", "192.2.2.2/24"]
+    apply_routes(prefix_list, nh_list, ch)
+    dump_ch(ch)
+
+    nh_list = ["10.0.1.1", "10.0.2.2"]
+    prefix_list  = ["192.1.1.1/24"]
+    apply_routes(prefix_list, nh_list, ch)
+    dump_ch(ch)
+
+    ch.stop()
+
+
+#generate_run(200,5)   
+small_test()
